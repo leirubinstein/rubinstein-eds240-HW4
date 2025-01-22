@@ -1,0 +1,14 @@
+---
+title: "EDS 240: Homework 4"
+author: "Leilanie Rubinstein"
+format: html
+---
+
+## Democratic voter file
+
+```{r}
+library(tidyverse)
+
+voter_file <- read_delim(here::here("data/County of Santa Barbara-Democratic Party_2.16.2024.TXT"), delim = "\t")
+```
+
