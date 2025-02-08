@@ -1,0 +1,149 @@
+---
+title: "Final Visualization - Data Exploration"
+author: "Leilanie Rubinstein"
+subtitle: "Part 2: Choosing the right graphic form"
+date: "last-modified"
+toc: true
+format: 
+  html:
+    embed-resources: true
+editor_options: 
+  chunk_output_type: console
+---
+
+## Setup
+
+```{r}
+#| warning: false
+#| message: false
+library(tidyverse)
+library(janitor)
+library(here)
+
+theme_set(theme_bw())
+```
+
+# Democratic voter file data
+
+These data were requested from the Santa Barbara County Elections office on February 16, 2024.
+
+```{r}
+#| warning: false
+voter_file <- read_delim(here::here("data/County of Santa Barbara-Democratic Party_2.16.2024.TXT"), delim = "\t")
+```
+
+```{r}
+voter_file <- voter_file %>%
+  clean_names()
+```
+
+### Visualization 1
+
+```{r}
+# Common places of birth
+voter_home_states <- voter_file %>%
+  count(place_of_birth) %>%
+  rename(place_of_birth_counts = n) %>%
+  arrange(desc(place_of_birth_counts)) %>%
+  slice(-2) %>% # remove NAs
+  slice_head(n = 10) %>%
+  mutate(place_of_birth = fct_reorder(.f = place_of_birth,
+                                      .x = place_of_birth_counts))
+
+# Create plot of top 10 birthplaces
+ggplot(voter_home_states, aes(x = place_of_birth, y = place_of_birth_counts)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Top 10 Places of Birth for Santa Barbara Democratic Voters",
+       x = "Place of Birth",
+       y = "Number of Voters",
+       caption = "Source: Santa Barbara Democratic Voter File (February, 2024)") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 12, face = "bold"),
+    axis.text = element_text(size = 10)
+  )
+```
+
+### Visualization 2
+
+```{r}
+# Registrations over time
+yearly_registration <- voter_file %>%
+  mutate(year = format(registration_date, "%Y")) %>%
+  filter(year >= "2000") %>%
+  count(year)
+
+# Create the plot of yearly registrations over time
+ggplot(yearly_registration, aes(x = year, y = n)) +
+  geom_line(group = 1, color = "steelblue") +
+  geom_point(color = "steelblue") +
+  labs(title = "Democratic Voter Registrations in Santa Barbara County",
+       subtitle = "2000 - 2024",
+       x = "Year",
+       y = "Number of New Registrations",
+       caption = "Source: Santa Barbara Democratic Voter File (February, 2024)") +
+  scale_x_discrete(breaks = seq(from = min(yearly_registration$year), 
+                              to = max(yearly_registration$year), 
+                              by = 4)) +
+  theme(
+    plot.title = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+Registration data extends back to 1964, but plotting a subset of the data allows us to more easily identify trends in recent years.
+
+### Visualization 3
+
+```{r}
+# Voters per city
+city_age <- voter_file %>%
+  # Calculate age and create age groups
+  mutate(
+    age = interval(dob, today()) %/% years(1),
+    age_group = cut(age, 
+                   breaks = c(18, 25, 35, 50, 65, Inf),
+                   labels = c("18-25", "26-35", "36-50", "51-65", "65+"),
+                   right = FALSE)
+  ) %>%
+  group_by(city) %>%
+  mutate(city_total = n()) %>%
+  group_by(city, age_group) %>%
+  summarize(
+    count = n(),
+    pct = count/first(city_total) * 100,
+    .groups = "drop"
+  ) %>%
+  mutate(city = fct_reorder(city, count, sum))
+
+# Create plot of registrations per city and age groups
+ggplot(city_age, aes(x = city, y = count, fill = age_group)) +
+  geom_col(position = "stack") +
+  coord_flip() +
+  scale_fill_brewer(palette = "Blues", direction = 1) +
+  labs(title = "Age Distribution of Democratic Voters by City",
+       subtitle = "Cities sorted by total number of registered voters",
+       x = NULL,
+       y = "Number of Registered Voters",
+       fill = "Age Group",
+       caption = "Source: Santa Barbara Democratic Voter File (2024)") +
+  theme_minimal() +
+  theme(
+    panel.grid.major.y = element_blank(),
+    axis.text = element_text(size = 10),
+    plot.title = element_text(size = 12, face = "bold")
+  )
+```
+
+### Analysis
+
+1. What have you learned about your data? Have any potentially interesting patterns emerged?
+- The number of voter registrations spike in general election years. Because this data was pulled in February of last year, it does not capture registrations that happened closer to the November election. Geographically, it is suprising that Santa Barbara has significantly more registered Democrats than Santa Maria, because Santa Maria has a 2023 population of about 109,000 compared to 89,000 for Santa Barbara. For places of birth, 'United States of America' is the 5th most popular response, possibly because people manually enter birthplaces when registering to vote. They may enter the United States instead of the specific state they were born in. 
+
+2. In HW #1, you outlined some questions that you wanted to answer using these data. Have you made any strides towards answering those questions? If yes, how so? If no, what next steps do you need to take (e.g. I need to create X plot type, I still need to track down Y data, I need to restructure existing data so that you can visualize it in Z ways, etc.)?
+- I still need to obtain the complete voter file and join my data to a spatial dataset that corresponds with the addresses to create a heatmap of voters. I think that the registration data showing a spike in election years visualizes an interest temporal trend.
+
+3. What challenges do you foresee encountering with your data? These can be data wrangling and / or visualization challenges.
+- I forsee challenges joining my data to address data to create a heatmap, because I am not sure if the address dataset will have data in the same format, or if there are misspellings in either dataset. Furthermore, precincts in the file do not correspond to census tracts, so it will be more complicated to plot boundaries for precincts if I decide on that. 
+
