@@ -1,0 +1,200 @@
+---
+title: "Final Visualization - Drafting"
+author: "Leilanie Rubinstein"
+date: "last-modified"
+toc: true
+format: 
+  html:
+    embed-resources: true
+editor_options: 
+  chunk_output_type: console
+execute:
+  warning: false
+  message: false
+---
+
+## Background Information + Questions
+
+1. I would like to produce an infographic using Santa Barbara County voter registration data. 
+
+2. My overarching question is: "What are voter registration trends in Santa Barbara County", and my three sub-questions are: 1) "What is the age composition of the electorate?"; 2) "What are temporal trends in new voter registrations?"; 3) "How are voters spatially distributed by political party in Santa Barbara?"
+
+3. Variables of interest:
+
+*Question 1:*
+
+- `dob`: voter date of birth
+- `city`
+
+*Question 2:*
+
+- `registration_date`: date of most current registration
+
+*Question 3:*
+
+- `precinct`: each address is assigned to a elections precinct
+- `address_number`
+- `street_name`
+- `street_type`
+- `city`
+
+4. Examples - 
+
+![Voter registrations over time](media/michigan_chart.jpg)
+I would like my registrations over time map to look something like the above.
+
+
+
+![2024 Election Results](media/nyt_2024_election_map.jpg)
+![SB Downtown precinct map](media/sb_downtown_precincts.jpg)
+I would like my spatial visualization of voter distribution to look something like the election results map, but have voter distribution determined per election precinct, as depicted in the map of downtown Santa Barbara. 
+
+5. Mockup drawing:
+![Draft infographic](media/IMG_0702.jpg)
+
+6. Mock visualizations:
+
+```{r}
+#| warning: false
+#| message: false
+# Load packages
+library(tidyverse)
+library(janitor)
+library(here)
+library(tidycensus)
+library(ggmap)
+library(sf)
+library(tigris)
+library(showtext)
+library(sysfonts)
+
+# Customize font and theme
+font_add_google("EB Garamond", "EBGaramond")
+showtext_auto()
+theme_set(theme_bw())
+```
+
+```{r}
+#| warning: false
+# Read in voter data
+voter_file <- read_delim(here::here("data/County of Santa Barbara-Democratic Party_2.16.2024.TXT"), delim = "\t")
+```
+
+```{r}
+# Clean names
+voter_file <- voter_file %>%
+  clean_names()
+```
+
+### Visualization 1 - What is the age composition of the electorate?
+
+```{r}
+# Voters per city
+city_age <- voter_file %>%
+  # Calculate age and create age groups
+  mutate(
+    age = interval(dob, today()) %/% years(1),
+    age_group = cut(age, 
+                    breaks = c(18, 25, 35, 50, 65, Inf),
+                    labels = c("18-25", "26-35", "36-50", "51-65", "65+"),
+                    right = FALSE)
+  ) %>%
+  group_by(city) %>%
+  mutate(city_total = n()) %>%
+  group_by(city, age_group) %>%
+  summarize(
+    count = n(),
+    pct = count/first(city_total) * 100,
+    .groups = "drop"
+  ) %>%
+  mutate(city = fct_reorder(city, count, sum))
+
+# Get top 10 cities
+city_age_top10 <- city_age %>%
+  group_by(city) %>%
+  summarize(total = sum(count)) %>%
+  top_n(10, total) %>%
+  pull(city)
+
+# Filter data and create plot
+ggplot(city_age %>% filter(city %in% city_age_top10), 
+       aes(x = city, y = count, fill = age_group)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  scale_fill_brewer(palette = "Blues", direction = 1) +
+  labs(title = "Age Distribution of Democratic Voters by City",
+       subtitle = "Cities sorted by total number of registered voters in 10 most populous cities\n",
+       x = NULL,
+       y = "\nNumber of Registered Voters",
+       fill = "Age Group",
+       caption = "\nSource: Santa Barbara Democratic Voter File (2024)") +
+  theme_bw() +
+  theme(
+    panel.grid.major.y = element_blank(),
+    text = element_text(family = "EBGaramond"),
+    axis.text = element_text(size = 10, family = "EBGaramond"),
+    plot.title = element_text(size = 12, face = "bold", family = "EBGaramond"),
+    plot.subtitle = element_text(family = "EBGaramond"),
+    plot.caption = element_text(family = "EBGaramond"),
+    legend.text = element_text(family = "EBGaramond")
+  )
+```
+
+### Visualization #2 - What are temporal trends in new voter registrations?
+
+```{r}
+# Registrations over time
+yearly_registration <- voter_file %>%
+  mutate(year = format(registration_date, "%Y")) %>%
+  filter(year >= "2000") %>%
+  count(year)
+
+# Create the plot of yearly registrations over time
+ggplot(yearly_registration, aes(x = year, y = n)) +
+  geom_line(group = 1, color = "steelblue") +
+  geom_point(color = "steelblue") +
+  labs(title = "Democratic Voter Registrations in Santa Barbara County",
+       subtitle = "Number of new registrations from 2000 - 2024, showing spikes in new registrations during general election years",
+       x = "Year",
+       y = "Number of New Registrations",
+       caption = "Source: Santa Barbara Democratic Voter File (February, 2024)") +
+  scale_x_discrete(breaks = seq(from = min(yearly_registration$year), 
+                                to = max(yearly_registration$year), 
+                                by = 4)) +
+  theme(
+    text = element_text(family = "EBGaramond"),
+    plot.title = element_text(size = 12, face = "bold", family = "EBGaramond"),
+    plot.subtitle = element_text(family = "EBGaramond"),
+    plot.caption = element_text(family = "EBGaramond"),
+    axis.title = element_text(family = "EBGaramond"),
+    axis.text = element_text(family = "EBGaramond"),
+    axis.text.x = element_text(angle = 45, hjust = 1, family = "EBGaramond")
+  )
+```
+
+### Visualization #3 - How are voters spatially distributed by political party in Santa Barbara?
+
+```{r}
+# Import google API key
+register_google(key = Sys.getenv("GOOGLE_API_KEY"))
+
+# Combine address components
+voter_file_addresses <- voter_file %>%
+  mutate(full_addresses = paste(
+  voter_file$address_number, 
+  voter_file$street_name,
+  voter_file$street_type,
+  voter_file$city,
+  voter_file$state,
+  voter_file$zip,
+  sep = " "
+))
+```
+
+7. 
+
+a. I submitted a request for the complete voter file on Thursday, because I feel that my temporal visualizations would be more interesting if the data went past the November election, and my spatial visualization would be more interesting if I could include other parties besides Democrats. I struggled to plot the address data for visualization three. 
+
+b. I am not sure if I need `ggmap` for visualization 3. I would like to create a heatmap of addresses over a map, but I am not sure how to encode the addresses to points on a map. I need to contact the County Elections office to see if they have geospatial data for election precinct boundaries. 
+
+c. Any feedback would be appreciated! I would like to make my number of registrations over time visualization more interesting, and need some help with visualization #3.
